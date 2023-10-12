@@ -5,13 +5,24 @@ public class Message {
     private String message;
     private long date;
 
+    private String img_url;
+
+    public String getImg_url() {
+        return img_url;
+    }
+
+    public void setImg_url(String img_url) {
+        this.img_url = img_url;
+    }
+
     public Message() {
     }
 
-    public Message(String author, String message, long date) {
+    public Message(String author, String message, long date, String img_url) {
         this.author = author;
         this.message = message;
         this.date = date;
+        this.img_url = img_url;
     }
 
     public long getDate() {

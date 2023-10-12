@@ -1,15 +1,19 @@
 package com.example.chatapp;
 
+import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
@@ -25,6 +29,7 @@ import com.firebase.ui.auth.AuthUI;
 import com.firebase.ui.auth.FirebaseAuthUIActivityResultContract;
 import com.firebase.ui.auth.IdpResponse;
 import com.firebase.ui.auth.data.model.FirebaseAuthUIAuthenticationResult;
+import com.google.android.gms.tasks.Continuation;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
@@ -36,7 +41,11 @@ import com.google.firebase.firestore.EventListener;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FirebaseFirestoreException;
 import com.google.firebase.firestore.QuerySnapshot;
+import com.google.firebase.storage.FirebaseStorage;
+import com.google.firebase.storage.StorageReference;
+import com.google.firebase.storage.UploadTask;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -49,6 +58,8 @@ public class MainActivity extends AppCompatActivity {
     private EditText editTextMess;
 
     private ImageView imageViewSendMess;
+    private ImageView imageViewSendImg;
+
     private String author;
 
 
@@ -57,10 +68,14 @@ public class MainActivity extends AppCompatActivity {
     private FirebaseFirestore db;
 
 
-
     private String DB_NAME = "messages";
 
+    private FirebaseStorage storage;
 
+    private StorageReference storageReference;
+    private UploadTask uploadTask;
+
+    private String img_url;
 
 
     @Override
@@ -77,18 +92,86 @@ public class MainActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
+    private ActivityResultLauncher<Intent> signInLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            new ActivityResultCallback<ActivityResult>() {
+                @Override
+                public void onActivityResult(ActivityResult result) {
+                    onImgResult(result);
+                }
+            }
+    );
+
+    public static String getLastBitFromUrl(final String url){
+        // return url.replaceFirst("[^?]*/(.*?)(?:\\?.*)","$1);" <-- incorrect
+        return url.replaceFirst(".*/([^/?]+).*", "$1");
+    }
+
+    public void onImgResult(ActivityResult result) {
+        if (result.getResultCode() == Activity.RESULT_OK) {
+            Intent tmp = result.getData();
+            if (tmp != null) {
+                Uri uri = tmp.getData();
+                if (uri != null) {
+                   String t_url = getLastBitFromUrl(uri.getLastPathSegment());
+                    StorageReference referenceToImages = storageReference.child("images/" + t_url);
+                    referenceToImages.putFile(uri).continueWithTask(new Continuation<UploadTask.TaskSnapshot, Task<Uri>>() {
+                        @Override
+                        public Task<Uri> then(@NonNull Task<UploadTask.TaskSnapshot> task) throws Exception {
+                            if (!task.isSuccessful()) {
+                                Toast.makeText(MainActivity.this, "Error process get url image", Toast.LENGTH_SHORT).show();
+                                throw task.getException();
+                            }
+
+                            // Continue with the task to get the download URL
+                            return referenceToImages.getDownloadUrl();
+                        }
+                    }).addOnCompleteListener(new OnCompleteListener<Uri>() {
+                        @Override
+                        public void onComplete(@NonNull Task<Uri> task) {
+                            if (task.isSuccessful()) {
+                                Uri downloadUri = task.getResult();
+                                Toast.makeText(MainActivity.this, "Get url image successful", Toast.LENGTH_SHORT).show();
+                                Log.i("MyBase",downloadUri.toString());
+                            } else {
+                                Toast.makeText(MainActivity.this, "Error get url image", Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    });
+                }
+            }
+        } else {
+
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         editTextMess = findViewById(R.id.editTextMessage);
         imageViewSendMess = findViewById(R.id.imageViewSendMess);
+        imageViewSendImg = findViewById(R.id.imageViewAddImg);
         recyclerViewMess = findViewById(R.id.recyclerViewChat);
         adapter = new MessageAdapters();
         recyclerViewMess.setLayoutManager(new LinearLayoutManager(this));
         adapter.setMessages(new ArrayList<>());
         recyclerViewMess.setAdapter(adapter);
         author = "No Name";
+        storage = FirebaseStorage.getInstance();
+        storageReference = storage.getReference();
+        //StorageReference referenceToImages = storageReference.child("images");
+
+        imageViewSendImg.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                intent.setType("image/jpeg");
+                intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+                //startActivityForResult(intent, );
+                signInLauncher.launch(intent);
+            }
+        });
         imageViewSendMess.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -118,8 +201,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-
-
     public void signOut(Context ctx) {
         AuthUI.getInstance()
                 .signOut(ctx)
@@ -133,11 +214,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    public  void signIn () {
-        Intent intent = new Intent( this, LoginActivity.class);
+    public void signIn() {
+        Intent intent = new Intent(this, LoginActivity.class);
         startActivity(intent);
     }
-
 
 
     @Override
@@ -160,7 +240,7 @@ public class MainActivity extends AppCompatActivity {
         String mess = editTextMess.getText().toString().trim();
         long date = System.currentTimeMillis();
         if (!mess.isEmpty()) {
-            sendMessage(author, mess, date);
+            sendMessage(author, mess, date, img_url);
             recyclerViewMess.scrollToPosition(adapter.getItemCount() - 1);
         }
     }
@@ -182,9 +262,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    public void sendMessage(String auth, String mess, long date) {
+    public void sendMessage(String auth, String mess, long date, String img_url) {
         db.collection(DB_NAME)
-                .add(new Message(auth, mess, date))
+                .add(new Message(auth, mess, date, img_url))
                 .addOnSuccessListener(new OnSuccessListener<DocumentReference>() {
                     @Override
                     public void onSuccess(DocumentReference documentReference) {
