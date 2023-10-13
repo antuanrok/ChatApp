@@ -1,5 +1,8 @@
 package com.example.chatapp.adapters;
 
+import android.content.Context;
+import android.preference.PreferenceManager;
+import android.text.Layout;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -20,8 +23,11 @@ import java.util.List;
 public class MessageAdapters extends RecyclerView.Adapter<MessageAdapters.MessageViewHolder> {
 
 
-    private List<Message> messages;
+    private static final int TYPE_MY_MESSAGE = 0;
+    private static final int TYPE_MY_OTHER_MESSAGE = 1;
+    private Context context;
 
+    private List<Message> messages;
 
 
     public List<Message> getMessages() {
@@ -33,15 +39,35 @@ public class MessageAdapters extends RecyclerView.Adapter<MessageAdapters.Messag
         notifyDataSetChanged();
     }
 
-    public MessageAdapters() {
+    public MessageAdapters(Context ctx) {
+
         this.messages = new ArrayList<>();
+        this.context = ctx;
     }
 
     @NonNull
     @Override
     public MessageViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.activity_item_message, parent, false);
+        int lay = 0;
+        if (viewType == TYPE_MY_MESSAGE) {
+            lay = R.layout.activity_item_message_my;
+        } else {
+            lay = R.layout.activity_item_message;
+        }
+        View view = LayoutInflater.from(parent.getContext()).inflate(lay, parent, false);
         return new MessageViewHolder(view);
+    }
+
+    @Override
+    public int getItemViewType(int position) {
+        Message message = messages.get(position);
+        String name_author = message.getAuthor();
+        if (name_author != null && name_author.equals(PreferenceManager.getDefaultSharedPreferences(context).getString("author", "no name"))) {
+            return TYPE_MY_MESSAGE;
+        } else {
+            return TYPE_MY_OTHER_MESSAGE;
+        }
+        //return super.getItemViewType(position);
     }
 
     @Override
@@ -50,13 +76,15 @@ public class MessageAdapters extends RecyclerView.Adapter<MessageAdapters.Messag
         holder.textViewAuth.setText(message.getAuthor());
         String textOfMessage = message.getMessage();
         String urlToImage = message.getImg_url();
-        if (textOfMessage!=null && !textOfMessage.isEmpty()) {
+        if (textOfMessage != null && !textOfMessage.isEmpty()) {
             holder.textViewMess.setText(message.getMessage());
             holder.imageViewImg.setVisibility(View.GONE);
+            holder.textViewMess.setVisibility(View.VISIBLE);
         }
-        if (urlToImage!=null && !urlToImage.isEmpty()) {
+        if (urlToImage != null && !urlToImage.isEmpty()) {
             holder.imageViewImg.setVisibility(View.VISIBLE);
             Picasso.get().load(urlToImage).into(holder.imageViewImg);
+            holder.textViewMess.setVisibility(View.GONE);
         }
     }
 

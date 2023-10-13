@@ -13,8 +13,10 @@ import androidx.recyclerview.widget.RecyclerView;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -57,9 +59,6 @@ public class MainActivity extends AppCompatActivity {
 
     private EditText editTextMess;
 
-    private ImageView imageViewSendMess;
-    private ImageView imageViewSendImg;
-
     private String author;
 
 
@@ -68,14 +67,12 @@ public class MainActivity extends AppCompatActivity {
     private FirebaseFirestore db;
 
 
-    private String DB_NAME = "messages";
-
-    private FirebaseStorage storage;
+    private final String DB_NAME = "messages";
 
     private StorageReference storageReference;
-    private UploadTask uploadTask;
-
-    private String img_url;
+    public String img_url;
+    private SharedPreferences preferences;
+    //  private UploadTask uploadTask;
 
 
     @Override
@@ -92,7 +89,7 @@ public class MainActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    private ActivityResultLauncher<Intent> signInLauncher = registerForActivityResult(
+    private final ActivityResultLauncher<Intent> signInLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             new ActivityResultCallback<ActivityResult>() {
                 @Override
@@ -102,7 +99,7 @@ public class MainActivity extends AppCompatActivity {
             }
     );
 
-    public static String getLastBitFromUrl(final String url){
+    public static String getLastBitFromUrl(final String url) {
         // return url.replaceFirst("[^?]*/(.*?)(?:\\?.*)","$1);" <-- incorrect
         return url.replaceFirst(".*/([^/?]+).*", "$1");
     }
@@ -113,8 +110,8 @@ public class MainActivity extends AppCompatActivity {
             if (tmp != null) {
                 Uri uri = tmp.getData();
                 if (uri != null) {
-                   String t_url = getLastBitFromUrl(uri.getLastPathSegment());
-                    StorageReference referenceToImages = storageReference.child("images/" + t_url);
+                    String t_url = getLastBitFromUrl(uri.getLastPathSegment());
+                    StorageReference referenceToImages = storageReference.child("images/" + t_url + "_" + System.currentTimeMillis());
                     referenceToImages.putFile(uri).continueWithTask(new Continuation<UploadTask.TaskSnapshot, Task<Uri>>() {
                         @Override
                         public Task<Uri> then(@NonNull Task<UploadTask.TaskSnapshot> task) throws Exception {
@@ -131,8 +128,10 @@ public class MainActivity extends AppCompatActivity {
                         public void onComplete(@NonNull Task<Uri> task) {
                             if (task.isSuccessful()) {
                                 Uri downloadUri = task.getResult();
+                                img_url = downloadUri.toString();
+                                prepMessToSend(null, img_url);
                                 Toast.makeText(MainActivity.this, "Get url image successful", Toast.LENGTH_SHORT).show();
-                                Log.i("MyBase",downloadUri.toString());
+                                Log.i("MyBase", img_url);
                             } else {
                                 Toast.makeText(MainActivity.this, "Error get url image", Toast.LENGTH_SHORT).show();
                             }
@@ -140,8 +139,6 @@ public class MainActivity extends AppCompatActivity {
                     });
                 }
             }
-        } else {
-
         }
     }
 
@@ -150,16 +147,17 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         editTextMess = findViewById(R.id.editTextMessage);
-        imageViewSendMess = findViewById(R.id.imageViewSendMess);
-        imageViewSendImg = findViewById(R.id.imageViewAddImg);
+        ImageView imageViewSendMess = findViewById(R.id.imageViewSendMess);
+        ImageView imageViewSendImg = findViewById(R.id.imageViewAddImg);
         recyclerViewMess = findViewById(R.id.recyclerViewChat);
-        adapter = new MessageAdapters();
+        adapter = new MessageAdapters(this);
         recyclerViewMess.setLayoutManager(new LinearLayoutManager(this));
         adapter.setMessages(new ArrayList<>());
         recyclerViewMess.setAdapter(adapter);
         author = "No Name";
-        storage = FirebaseStorage.getInstance();
+        FirebaseStorage storage = FirebaseStorage.getInstance();
         storageReference = storage.getReference();
+        preferences = PreferenceManager.getDefaultSharedPreferences(this);
         //StorageReference referenceToImages = storageReference.child("images");
 
         imageViewSendImg.setOnClickListener(new View.OnClickListener() {
@@ -175,13 +173,16 @@ public class MainActivity extends AppCompatActivity {
         imageViewSendMess.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                prepMessToSend();
+                prepMessToSend(editTextMess.getText().toString().trim(), null);
             }
         });
         if (getCurUser()) {
             Toast.makeText(this, "Logged", Toast.LENGTH_SHORT).show();
             FirebaseUser user = FirebaseAuth.getInstance().getCurrentUser();
-            author = user.getEmail();
+            if (user != null) {
+                author = user.getEmail();
+                preferences.edit().putString("author",author).apply();
+            }
         } else {
             signOut(this);
         }
@@ -230,24 +231,34 @@ public class MainActivity extends AppCompatActivity {
                     messages.clear();
                     messages = value.toObjects(Message.class);
                     showData(messages);
+                    img_url = null;
                 }
             }
         });
 
     }
 
-    private void prepMessToSend() {
-        String mess = editTextMess.getText().toString().trim();
+    private void prepMessToSend(String mess, String img_url) {
+        //String mess = editTextMess.getText().toString().trim();
         long date = System.currentTimeMillis();
-        if (!mess.isEmpty()) {
-            sendMessage(author, mess, date, img_url);
-            recyclerViewMess.scrollToPosition(adapter.getItemCount() - 1);
+        if (mess != null) {
+            if (!mess.isEmpty()) {
+                sendMessage(author, mess, date, null);
+            }
+        } else if (img_url != null) {
+            if (!img_url.isEmpty()) {
+                sendMessage(author, null, date, img_url);}
+
         }
+
+        // sendMessage(author, null, date, img_url);
+       // recyclerViewMess.scrollToPosition(adapter.getItemCount() - 1);
     }
 
 
     public void showData(List<Message> messages) {
         adapter.setMessages(messages);
+        recyclerViewMess.scrollToPosition(adapter.getItemCount() - 1);
     }
 
 
@@ -262,14 +273,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    public void sendMessage(String auth, String mess, long date, String img_url) {
+    public void sendMessage(String auth, String mess, long date, String url) {
         db.collection(DB_NAME)
-                .add(new Message(auth, mess, date, img_url))
+                .add(new Message(auth, mess, date, url))
                 .addOnSuccessListener(new OnSuccessListener<DocumentReference>() {
                     @Override
                     public void onSuccess(DocumentReference documentReference) {
                         completeLoad("DocumentSnapshot added with ID: " + documentReference.getId());
                         Log.i("MyBase", "DocumentSnapshot added with ID: " + documentReference.getId());
+                        //   img_url = null;
                     }
                 })
                 .addOnFailureListener(new OnFailureListener() {
